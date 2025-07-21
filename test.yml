@@ -1,0 +1,18 @@
+---
+- name: Test AWX simple playbook
+  hosts: all
+  become: true
+  tasks:
+    - name: Create a test file
+      file:
+        path: /tmp/awx_test_file.txt
+        state: touch
+
+    - name: Get Firefox version
+      command: firefox --version
+      register: firefox_output
+      ignore_errors: yes
+
+    - name: Show Firefox version
+      debug:
+        var: firefox_output.stdout
