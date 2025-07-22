@@ -1,0 +1,66 @@
+---
+- name: Get connected monitors and resolutions (Sway)
+  hosts: all
+  become: no
+  gather_facts: yes
+
+  tasks:
+    - name: Check if Sway is running
+      ansible.builtin.command: pgrep -x sway
+      register: sway_running
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Get monitor information via swaymsg
+      ansible.builtin.command: swaymsg -t get_outputs
+      register: monitor_info
+      changed_when: false
+      when: sway_running.rc == 0
+
+    - name: Parse and display monitor information
+      ansible.builtin.debug:
+        msg: |
+          Connected monitors:
+          {% for output in monitor_info.stdout | from_json %}
+          - {{ output.name }} ({{ output.model }}):
+            Resolution: {{ output.current_mode.width }}x{{ output.current_mode.height }}
+            Refresh rate: {{ output.current_mode.refresh }} Hz
+            Active: {{ output.active }}
+            Make: {{ output.make }}
+            Serial: {{ output.serial }}
+          {% endfor %}
+      when: sway_running.rc == 0
+
+    - name: Warning when Sway is not running
+      ansible.builtin.debug:
+        msg: "Sway is not running on this host. This playbook only works with Sway Wayland compositor."
+      when: sway_running.rc != 0
+
+    - name: Alternative method via DRM (Direct Rendering Manager)
+      ansible.builtin.command: |
+        for card in /sys/class/drm/card*-*; do
+          if [[ "$(cat "$card/status")" == "connected" ]]; then
+            echo "Monitor: $(basename "$card")"
+            echo "Status: connected"
+            if [[ -f "$card/modes" ]]; then
+              echo "Current mode: $(cat "$card/modes" | head -n1)"
+            fi
+            if [[ -f "$card/edid" ]]; then
+              echo "EDID info available"
+            fi
+            echo "---"
+          fi
+        done
+      register: drm_info
+      changed_when: false
+      when: 
+        - sway_running.rc != 0
+        - ansible_os_family == 'Debian'
+
+    - name: Display DRM monitor information
+      ansible.builtin.debug:
+        msg: "DRM monitor info:\n{{ drm_info.stdout }}"
+      when: 
+        - sway_running.rc != 0
+        - ansible_os_family == 'Debian'
+        - drm_info.stdout != ""
