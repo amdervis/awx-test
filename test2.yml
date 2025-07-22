@@ -1,0 +1,74 @@
+---
+- name: Check software versions and inspect client.json
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    # Check Firefox version
+    - name: Get Firefox version
+      ansible.builtin.command: firefox --version
+      register: firefox_version
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Display Firefox version
+      ansible.builtin.debug:
+        msg: "Firefox version: {{ firefox_version.stdout | default('Firefox not installed') }}"
+      when: firefox_version is defined
+
+    # Check Node.js version
+    - name: Get Node.js version
+      ansible.builtin.command: node --version
+      register: node_version
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Display Node.js version
+      ansible.builtin.debug:
+        msg: "Node.js version: {{ node_version.stdout | default('Node.js not installed') }}"
+      when: node_version is defined
+
+    # Check OpenVPN version
+    - name: Get OpenVPN version
+      ansible.builtin.command: openvpn --version
+      register: openvpn_version
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Display OpenVPN version (first line only)
+      ansible.builtin.debug:
+        msg: "OpenVPN version: {{ openvpn_version.stdout_lines[0] | default('OpenVPN not installed') if openvpn_version.stdout_lines is defined else 'OpenVPN not installed' }}"
+      when: openvpn_version is defined
+
+    # Check and display client.json
+    - name: Check if /opt/webplayer/data/client.json exists
+      ansible.builtin.stat:
+        path: /opt/webplayer/data/client.json
+      register: client_json
+
+    - name: Display client.json status
+      ansible.builtin.debug:
+        msg: "client.json exists: {{ client_json.stat.exists | default(false) }}"
+
+    - name: Show client.json details if exists
+      ansible.builtin.debug:
+        msg: |
+          client.json details:
+          - Path: {{ client_json.stat.path }}
+          - Size: {{ client_json.stat.size }} bytes
+          - Last modified: {{ client_json.stat.mtime }}
+      when: client_json.stat.exists
+
+    - name: Read client.json content
+      ansible.builtin.command: cat /opt/webplayer/data/client.json
+      register: client_json_content
+      changed_when: false
+      when: client_json.stat.exists
+
+    - name: Display client.json content
+      ansible.builtin.debug:
+        msg: "client.json content:\n{{ client_json_content.stdout | from_json | to_nice_json }}"
+      when:
+        - client_json.stat.exists
+        - client_json_content.stdout != ""
