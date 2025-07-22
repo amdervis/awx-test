@@ -1,0 +1,51 @@
+---
+- name: Gather system information and check for updates
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Get system uptime
+      ansible.builtin.command: uptime
+      register: uptime_result
+      changed_when: false
+
+    - name: Display uptime
+      ansible.builtin.debug:
+        msg: "System uptime: {{ uptime_result.stdout }}"
+
+    - name: Get Debian version information
+      ansible.builtin.command: lsb_release -a
+      register: debian_version
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Display Debian version
+      ansible.builtin.debug:
+        msg: "Debian version: {{ debian_version.stdout_lines | select('search', 'Description') | list | first | regex_replace('Description:\\s+', '') }}"
+      when: ansible_os_family == 'Debian'
+
+    - name: Update apt package index
+      ansible.builtin.apt:
+        update_cache: yes
+      when: ansible_os_family == 'Debian'
+
+    - name: Check for available updates
+      ansible.builtin.command: apt list --upgradable
+      register: available_updates
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Display available updates
+      ansible.builtin.debug:
+        msg: "Available updates:\n{{ available_updates.stdout_lines | join('\n') }}"
+      when: 
+        - ansible_os_family == 'Debian'
+        - available_updates.stdout != "Listing..."
+
+    - name: Display no updates available message
+      ansible.builtin.debug:
+        msg: "No package updates available"
+      when: 
+        - ansible_os_family == 'Debian'
+        - available_updates.stdout == "Listing..."
