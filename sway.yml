@@ -1,42 +1,85 @@
 ---
-- name: Get connected monitors and resolutions (Sway)
+- name: Get connected monitors and resolutions
   hosts: all
   become: no
   gather_facts: yes
 
   tasks:
-    - name: Check if Sway is running
+    - name: Check if we're running locally (not over SSH)
+      ansible.builtin.set_fact:
+        is_local_execution: "{{ ansible_connection == 'local' }}"
+
+    - name: Check if Sway is running (local only)
       ansible.builtin.command: pgrep -x sway
       register: sway_running
       ignore_errors: yes
       changed_when: false
+      when: is_local_execution
 
-    - name: Get monitor information via swaymsg
-      ansible.builtin.command: swaymsg -t get_outputs
+    - name: Get monitor information via swaymsg (local only)
+      ansible.builtin.command: >
+        swaymsg -t get_outputs
       register: monitor_info
       changed_when: false
-      when: sway_running.rc == 0
+      environment:
+        SWAYSOCK: "{{ lookup('env', 'SWAYSOCK') }}"
+        WAYLAND_DISPLAY: "{{ lookup('env', 'WAYLAND_DISPLAY') }}"
+      when:
+        - is_local_execution
+        - sway_running.rc == 0
 
-    - name: Parse and display monitor information
+    - name: Parse and display monitor information (Sway)
       ansible.builtin.debug:
         msg: |
-          Connected monitors:
+          Connected monitors (Sway):
           {% for output in monitor_info.stdout | from_json %}
           - {{ output.name }} ({{ output.model }}):
             Resolution: {{ output.current_mode.width }}x{{ output.current_mode.height }}
             Refresh rate: {{ output.current_mode.refresh }} Hz
             Active: {{ output.active }}
             Make: {{ output.make }}
-            Serial: {{ output.serial }}
           {% endfor %}
-      when: sway_running.rc == 0
+      when:
+        - is_local_execution
+        - sway_running.rc == 0
+        - monitor_info.stdout != ""
 
-    - name: Warning when Sway is not running
+    - name: Get monitor info via xrandr (X11 fallback)
+      ansible.builtin.command: xrandr --query
+      register: xrandr_info
+      changed_when: false
+      when:
+        - not is_local_execution or sway_running.rc != 0
+
+    - name: Parse xrandr output for connected monitors
+      ansible.builtin.set_fact:
+        connected_monitors: |
+          {% set lines = xrandr_info.stdout_lines %}
+          {% set monitors = [] %}
+          {% for line in lines %}
+            {% if ' connected' in line %}
+              {% set parts = line.split() %}
+              {% set name = parts[0] %}
+              {% set primary = 'primary' in line %}
+              {% set resolution = parts[2] if primary else parts[1] %}
+              {% set monitors = monitors + [{'name': name, 'resolution': resolution, 'primary': primary}] %}
+            {% endif %}
+          {% endfor %}
+          {{ monitors }}
+      when: xrandr_info.stdout != ""
+
+    - name: Display xrandr monitor information
       ansible.builtin.debug:
-        msg: "Sway is not running on this host. This playbook only works with Sway Wayland compositor."
-      when: sway_running.rc != 0
+        msg: |
+          Connected monitors (X11):
+          {% for monitor in connected_monitors %}
+          - {{ monitor.name }}:
+              Resolution: {{ monitor.resolution }}
+              Primary: {{ monitor.primary }}
+          {% endfor %}
+      when: connected_monitors is defined and connected_monitors | length > 0
 
-    - name: Alternative method via DRM (Direct Rendering Manager)
+    - name: Get monitor info via DRM (fallback)
       ansible.builtin.command: |
         for card in /sys/class/drm/card*-*; do
           if [[ "$(cat "$card/status")" == "connected" ]]; then
@@ -45,22 +88,24 @@
             if [[ -f "$card/modes" ]]; then
               echo "Current mode: $(cat "$card/modes" | head -n1)"
             fi
-            if [[ -f "$card/edid" ]]; then
-              echo "EDID info available"
-            fi
             echo "---"
           fi
         done
       register: drm_info
       changed_when: false
-      when: 
-        - sway_running.rc != 0
-        - ansible_os_family == 'Debian'
+      when:
+        - not is_local_execution or sway_running.rc != 0
+        - connected_monitors is undefined or connected_monitors | length == 0
 
     - name: Display DRM monitor information
       ansible.builtin.debug:
         msg: "DRM monitor info:\n{{ drm_info.stdout }}"
-      when: 
-        - sway_running.rc != 0
-        - ansible_os_family == 'Debian'
-        - drm_info.stdout != ""
+      when: drm_info.stdout != ""
+
+    - name: No monitor detection method available
+      ansible.builtin.debug:
+        msg: "Could not detect monitors using any method (Sway/X11/DRM)"
+      when:
+        - not is_local_execution or sway_running.rc != 0
+        - connected_monitors is undefined or connected_monitors | length == 0
+        - drm_info.stdout == ""
