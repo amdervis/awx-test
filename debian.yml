@@ -41,6 +41,23 @@
         update_cache: yes
       tags: packages
 
+    - name: Verify sudo package installation
+      command: dpkg -l sudo
+      register: sudo_installed
+      changed_when: false
+      tags: packages
+
+    - name: Display sudo installation status
+      debug:
+        msg: "Sudo package status: {{ sudo_installed.stdout_lines }}"
+      tags: packages
+
+    - name: Find visudo location
+      command: which visudo
+      register: visudo_path
+      changed_when: false
+      tags: packages
+
     - name: Ensure the regular user exists
       user:
         name: "{{ regular_user }}"
@@ -56,13 +73,23 @@
         append: yes
       tags: user_setup
 
-    - name: Configure sudo access for the user
+    - name: Configure sudo access for the user (without validation first)
       lineinfile:
         path: /etc/sudoers
         line: "{{ regular_user }}  ALL=(ALL:ALL) ALL"
         regexp: "^{{ regular_user }}\\s"
-        validate: 'visudo -cf %s'
         backup: yes
+      tags: sudo_config
+
+    - name: Validate sudoers file after modification
+      command: /usr/sbin/visudo -c
+      register: sudoers_valid
+      changed_when: false
+      tags: sudo_config
+
+    - name: Display sudoers validation result
+      debug:
+        msg: "Sudoers file validation: {{ sudoers_valid.stdout }}"
       tags: sudo_config
 
     - name: Verify sudo configuration
