@@ -1,8 +1,11 @@
 ---
 - name: Debian 12 Post-Installation Configuration
   hosts: all
-  remote_user: root  # Connect directly as root initially
-  gather_facts: no   # Skip facts gathering until sudo is available
+  remote_user: "{{ ansible_user | default('real') }}"  # Connect as regular user
+  become: yes
+  become_method: su     # Use 'su' instead of 'sudo' since sudo isn't installed
+  become_user: root
+  gather_facts: no      # Skip facts gathering initially
   vars:
     regular_user: "real"  # Change this to your desired username
     
