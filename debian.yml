@@ -1,12 +1,21 @@
 ---
 - name: Debian 12 Post-Installation Configuration
   hosts: all
-  become: yes
-  become_user: root
+  remote_user: root  # Connect directly as root initially
+  gather_facts: no   # Skip facts gathering until sudo is available
   vars:
     regular_user: "real"  # Change this to your desired username
     
   tasks:
+    - name: Install python3 if not present (raw command)
+      raw: |
+        if ! command -v python3 >/dev/null 2>&1; then
+          apt update && apt install -y python3
+        fi
+      changed_when: false
+
+    - name: Gather facts now that python3 is available
+      setup:
     - name: Comment out CDROM sources in apt sources.list
       lineinfile:
         path: /etc/apt/sources.list
@@ -63,6 +72,10 @@
       debug:
         msg: "Sudo privileges for {{ regular_user }}: {{ sudo_check.stdout_lines }}"
       tags: verification
+
+    - name: Switch context to regular user for verification
+      debug:
+        msg: "Configuration complete. User '{{ regular_user }}' can now use sudo. You can now switch to this user with 'su {{ regular_user }}'"
 
   handlers:
     - name: update apt cache
