@@ -1,0 +1,132 @@
+---
+- name: Download and Deploy Application from ZIP
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    # Application configuration - modify these variables as needed
+    app_download_url: "https://signagedev.com/downloads/webplayer/master.zip"  # Change this to your ZIP URL
+    app_name: "webplayer"                                # Change this to your app name
+    temp_download_path: "/tmp/{{ app_name }}.zip"
+    app_install_path: "/opt/{{ app_name }}"
+    app_owner: "real"                                # Change ownership as needed
+    app_group: "real"                                # Change group as needed
+    install_script_name: "install.sh"               # Name of the installation script in the ZIP
+    cleanup_temp_files: true                        # Set to false to keep temp files for debugging
+
+  tasks:
+    - name: Create application directory in /opt
+      file:
+        path: "{{ app_install_path }}"
+        state: directory
+        owner: "{{ app_owner }}"
+        group: "{{ app_group }}"
+        mode: '0755'
+      tags: preparation
+
+    - name: Download application ZIP file
+      get_url:
+        url: "{{ app_download_url }}"
+        dest: "{{ temp_download_path }}"
+        mode: '0644'
+        timeout: 300
+        validate_certs: yes
+      register: download_result
+      tags: download
+
+    - name: Display download information
+      debug:
+        msg: "Downloaded {{ app_download_url }} to {{ temp_download_path }}"
+      when: download_result.changed
+      tags: download
+
+    - name: Extract ZIP file to /opt directory
+      unarchive:
+        src: "{{ temp_download_path }}"
+        dest: "{{ app_install_path }}"
+        remote_src: yes
+        owner: "{{ app_owner }}"
+        group: "{{ app_group }}"
+        creates: "{{ app_install_path }}/{{ install_script_name }}"  # Skip if install script already exists
+      register: extract_result
+      tags: extract
+
+    - name: Set proper ownership recursively on extracted files
+      file:
+        path: "{{ app_install_path }}"
+        owner: "{{ app_owner }}"
+        group: "{{ app_group }}"
+        recurse: yes
+      tags: permissions
+
+    - name: Make installation script executable
+      file:
+        path: "{{ app_install_path }}/{{ install_script_name }}"
+        mode: '0755'
+      tags: permissions
+
+    - name: Check if installation script exists
+      stat:
+        path: "{{ app_install_path }}/{{ install_script_name }}"
+      register: install_script_stat
+      tags: verification
+
+    - name: Display installation script status
+      debug:
+        msg: |
+          Installation script status:
+          - Path: {{ app_install_path }}/{{ install_script_name }}
+          - Exists: {{ install_script_stat.stat.exists }}
+          - Executable: {{ install_script_stat.stat.executable | default('N/A') }}
+      tags: verification
+
+    - name: Run installation script
+      command: "./{{ install_script_name }}"
+      args:
+        chdir: "{{ app_install_path }}"
+      register: install_result
+      when: install_script_stat.stat.exists
+      tags: install
+
+    - name: Display installation output
+      debug:
+        msg: |
+          Installation completed:
+          Return code: {{ install_result.rc | default('N/A') }}
+          Output: {{ install_result.stdout | default('No output') }}
+      when: install_result is defined
+      tags: install
+
+    - name: Handle installation script errors
+      debug:
+        msg: |
+          Installation failed with error:
+          {{ install_result.stderr }}
+      when: install_result is defined and install_result.rc != 0
+      tags: install
+
+    - name: Clean up temporary ZIP file
+      file:
+        path: "{{ temp_download_path }}"
+        state: absent
+      when: cleanup_temp_files | bool
+      tags: cleanup
+
+    - name: Installation summary
+      debug:
+        msg: |
+          Application deployment completed:
+          - App name: {{ app_name }}
+          - Installed to: {{ app_install_path }}
+          - Owner: {{ app_owner }}:{{ app_group }}
+          - Installation script: {{ install_script_name }}
+          - Status: {{ 'SUCCESS' if (install_result.rc | default(1)) == 0 else 'FAILED' }}
+      tags: summary
+
+  handlers:
+    - name: restart application service
+      systemd:
+        name: "{{ app_name }}"
+        state: restarted
+        enabled: yes
+      ignore_errors: yes  # Service might not exist yet
