@@ -1,0 +1,70 @@
+---
+- name: Debian 12 Post-Installation Configuration
+  hosts: all
+  become: yes
+  become_user: root
+  vars:
+    regular_user: "real"  # Change this to your desired username
+    
+  tasks:
+    - name: Comment out CDROM sources in apt sources.list
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: '^deb cdrom'
+        line: '#\g<0>'
+        backrefs: yes
+      notify: update apt cache
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+      tags: packages
+
+    - name: Install essential packages
+      apt:
+        name:
+          - sudo
+          - unzip
+        state: present
+        update_cache: yes
+      tags: packages
+
+    - name: Ensure the regular user exists
+      user:
+        name: "{{ regular_user }}"
+        state: present
+        shell: /bin/bash
+        create_home: yes
+      tags: user_setup
+
+    - name: Add user to sudo group
+      user:
+        name: "{{ regular_user }}"
+        groups: sudo
+        append: yes
+      tags: user_setup
+
+    - name: Configure sudo access for the user
+      lineinfile:
+        path: /etc/sudoers
+        line: "{{ regular_user }}  ALL=(ALL:ALL) ALL"
+        regexp: "^{{ regular_user }}\\s"
+        validate: 'visudo -cf %s'
+        backup: yes
+      tags: sudo_config
+
+    - name: Verify sudo configuration
+      command: sudo -l -U {{ regular_user }}
+      register: sudo_check
+      changed_when: false
+      tags: verification
+
+    - name: Display sudo privileges for user
+      debug:
+        msg: "Sudo privileges for {{ regular_user }}: {{ sudo_check.stdout_lines }}"
+      tags: verification
+
+  handlers:
+    - name: update apt cache
+      apt:
+        update_cache: yes
