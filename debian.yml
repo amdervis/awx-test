@@ -41,23 +41,6 @@
         update_cache: yes
       tags: packages
 
-    - name: Verify sudo package installation
-      command: dpkg -l sudo
-      register: sudo_installed
-      changed_when: false
-      tags: packages
-
-    - name: Display sudo installation status
-      debug:
-        msg: "Sudo package status: {{ sudo_installed.stdout_lines }}"
-      tags: packages
-
-    - name: Find visudo location
-      command: which visudo
-      register: visudo_path
-      changed_when: false
-      tags: packages
-
     - name: Ensure the regular user exists
       user:
         name: "{{ regular_user }}"
